@@ -21,7 +21,7 @@ limitations under the License.
 // which will makes the listen address change from 127.0.0.1:4140 to
 // 0.0.0.0:4140
 #if ENABLE_IPV4
-__section("cgroup/bind4") int mb_bind(struct bpf_sock_addr *ctx)
+SEC("cgroup/bind4") int mb_bind(struct bpf_sock_addr *ctx)
 {
 #if MESH != LINKERD
     // only works on linkerd
@@ -44,5 +44,4 @@ __section("cgroup/bind4") int mb_bind(struct bpf_sock_addr *ctx)
 }
 #endif
 
-char ____license[] __section("license") = "GPL";
-int _version __section("version") = 1;
+char LICENSE[] SEC("license") = "GPL";

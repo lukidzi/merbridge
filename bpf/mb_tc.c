@@ -18,8 +18,10 @@ limitations under the License.
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
 #include <linux/pkt_cls.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -44,8 +46,8 @@ const char argp_program_doc[] =
 
 static const struct argp_option opts[] = {
     {"verbose", 'v', NULL, 0, "Verbose debug output"},
-    {"bpffs", 'b', "/sys/fs/bpf", 0, "BPF filesystem path"},
-    {"iface", 'i', "eth0", 0, "Network Interface name"},
+    {"bpffs", 'b', "PATH", 0, "BPF filesystem path"},
+    {"iface", 'i', "NAME", 0, "Network Interface name to attach programs to"},
     {},
 };
 
@@ -98,9 +100,75 @@ void print_env_maybe()
 
     printf("#### ENV\n");
     printf("%-15s : %s\n", "bpffs", env.bpffs);
-    printf("%-15s : %s\n", "iface", env.iface);
+    printf("%-15s : %s\n", "iface", env.iface ? env.iface : "");
     printf("%-15s : %s\n", "verbose", env.verbose ? "true" : "false");
     printf("####\n");
+}
+
+// TODO (bartsmykla): check errno?
+int get_ifindex(char *flag_value)
+{
+    int ifindex = -1;
+    struct ifaddrs *ifaddr, *ifa;
+
+    if (flag_value) {
+        ifindex = if_nametoindex(flag_value);
+        if (ifindex < 1) {
+            fprintf(stderr,
+                    "cannot get index of interface %s - it may not exist\n",
+                    flag_value);
+            return -1;
+        }
+
+        return ifindex;
+    }
+
+    printf("flag --iface was not specified - will try to determine iface "
+           "name automatically\n");
+
+    if (getifaddrs(&ifaddr) == -1) {
+        fprintf(stderr, "getifaddrs call failed\n");
+        return -1;
+    }
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        // ignore interfaces in non running state
+        if (!(ifa->ifa_flags & IFF_RUNNING)) {
+            continue;
+        }
+
+        // ignore loopback interfaces
+        if (ifa->ifa_flags & IFF_LOOPBACK) {
+            continue;
+        }
+
+        // TODO (bartsmykla): we are currently supporting only IPv4
+        //  IPv6: ifa->ifa_addr->sa_family == AF_INET6
+        if (ifa->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+
+        if (ifindex > 0) {
+            fprintf(stderr,
+                    "more than 1 running network interface found (%s will be "
+                    "ignored)\n",
+                    ifa->ifa_name);
+            continue;
+        }
+
+        printf("found interface: %s\n", ifa->ifa_name);
+
+        ifindex = if_nametoindex(ifa->ifa_name);
+        if (ifindex < 1) {
+            fprintf(stderr, "cannot get index of interface %s\n",
+                    ifa->ifa_name);
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+
+    return ifindex;
 }
 
 int main(int argc, char **argv)
@@ -108,11 +176,19 @@ int main(int argc, char **argv)
     struct mb_tc_bpf *skel;
     int err, egress_fd, ingress_fd, ifindex = -1;
 
+    // default values
+    env.bpffs = "/sys/fs/bpf";
+
     /* Parse command line arguments */
     err = argp_parse(&argp, argc, argv, 0, NULL, &env);
     if (err) {
         fprintf(stderr, "parsing arguments failed with error: %d\n", err);
         return err;
+    }
+
+    ifindex = get_ifindex(env.iface);
+    if (ifindex < 1) {
+        return -1;
     }
 
     print_env_maybe();
@@ -139,14 +215,6 @@ int main(int argc, char **argv)
         printf("loading program skeleton failed with error: %d\n", err);
         mb_tc_bpf__destroy(skel);
         return err;
-    }
-
-    ifindex = if_nametoindex(env.iface);
-    if (ifindex < 1) {
-        fprintf(stderr, "trying to map interface's index (%u) to name failed\n",
-                ifindex);
-        mb_tc_bpf__destroy(skel);
-        return 1;
     }
 
     ingress_fd = bpf_program__fd(skel->progs.mb_tc_ingress);

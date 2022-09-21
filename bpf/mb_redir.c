@@ -40,7 +40,7 @@ const char argp_program_doc[] =
 
 static const struct argp_option opts[] = {
     {"verbose", 'v', NULL, 0, "Verbose debug output"},
-    {"bpffs", 'b', "/sys/fs/bpf", 0, "BPF filesystem path"},
+    {"bpffs", 'b', "PATH", 0, "BPF filesystem path"},
     {},
 };
 
@@ -100,6 +100,9 @@ int main(int argc, char **argv)
 {
     struct mb_redir_bpf *skel;
     int err, map_fd;
+
+    // default values
+    env.bpffs = "/sys/fs/bpf";
 
     /* Parse command line arguments */
     err = argp_parse(&argp, argc, argv, 0, NULL, &env);

@@ -15,12 +15,19 @@ limitations under the License.
 */
 
 #include "headers/helpers.h"
-#include "headers/maps.h"
 
 #define MAX_OPS_BUFF_LENGTH 4096
 #define SO_ORIGINAL_DST 80
 
-__section("cgroup/getsockopt") int mb_get_sockopt(struct bpf_sockopt *ctx)
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65535);
+    __uint(key_size, sizeof(struct pair));
+    __uint(value_size, sizeof(struct origin_info));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} pair_orig_dst SEC(".maps");
+
+SEC("cgroup/getsockopt") int mb_get_sockopt(struct bpf_sockopt *ctx)
 {
     // currently, eBPF can not deal with optlen more than 4096 bytes, so, we
     // should limit this.
@@ -134,5 +141,4 @@ __section("cgroup/getsockopt") int mb_get_sockopt(struct bpf_sockopt *ctx)
     return 1;
 }
 
-char ____license[] __section("license") = "GPL";
-int _version __section("version") = 1;
+char LICENSE[] SEC("license") = "GPL";

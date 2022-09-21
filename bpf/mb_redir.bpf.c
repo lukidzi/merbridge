@@ -15,9 +15,16 @@ limitations under the License.
 */
 
 #include "headers/helpers.h"
-#include "headers/maps.h"
 
-__section("sk_msg") int mb_msg_redir(struct sk_msg_md *msg)
+struct {
+    __uint(type, BPF_MAP_TYPE_SOCKHASH);
+    __uint(max_entries, 65535);
+    __uint(key_size, sizeof(struct pair));
+    __uint(value_size, sizeof(__u32));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} sock_pair_map SEC(".maps");
+
+SEC("sk_msg") int mb_msg_redir(struct sk_msg_md *msg)
 {
     struct pair p;
     memset(&p, 0, sizeof(p));
@@ -47,5 +54,4 @@ __section("sk_msg") int mb_msg_redir(struct sk_msg_md *msg)
     return 1;
 }
 
-char ____license[] __section("license") = "GPL";
-int _version __section("version") = 1;
+char LICENSE[] SEC("license") = "GPL";

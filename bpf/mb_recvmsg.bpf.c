@@ -15,11 +15,18 @@ limitations under the License.
 */
 
 #include "headers/helpers.h"
-#include "headers/maps.h"
 #include "headers/mesh.h"
 
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65535);
+    __uint(key_size, sizeof(__u64));
+    __uint(value_size, sizeof(struct origin_info));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} cookie_orig_dst SEC(".maps");
+
 #if ENABLE_IPV4
-__section("cgroup/recvmsg4") int mb_recvmsg4(struct bpf_sock_addr *ctx)
+SEC("cgroup/recvmsg4") int mb_recvmsg4(struct bpf_sock_addr *ctx)
 {
 #if MESH != ISTIO && MESH != KUMA
     // only works on istio and kuma
@@ -48,7 +55,7 @@ __section("cgroup/recvmsg4") int mb_recvmsg4(struct bpf_sock_addr *ctx)
 #endif
 
 #if ENABLE_IPV6
-__section("cgroup/recvmsg6") int mb_recvmsg6(struct bpf_sock_addr *ctx)
+SEC("cgroup/recvmsg6") int mb_recvmsg6(struct bpf_sock_addr *ctx)
 {
 #if MESH != ISTIO && MESH != KUMA
     // only works on istio
@@ -77,5 +84,4 @@ __section("cgroup/recvmsg6") int mb_recvmsg6(struct bpf_sock_addr *ctx)
 }
 #endif
 
-char ____license[] __section("license") = "GPL";
-int _version __section("version") = 1;
+char LICENSE[] SEC("license") = "GPL";

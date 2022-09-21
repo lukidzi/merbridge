@@ -42,8 +42,8 @@ const char argp_program_doc[] =
 
 static const struct argp_option opts[] = {
     {"verbose", 'v', NULL, 0, "Verbose debug output"},
-    {"cgroup", 'c', "/sys/fs/cgroup", 0, "cgroup path"},
-    {"bpffs", 'b', "/sys/fs/bpf", 0, "BPF filesystem path"},
+    {"cgroup", 'c', "PATH", 0, "cgroup path"},
+    {"bpffs", 'b', "PATH", 0, "BPF filesystem path"},
     {},
 };
 
@@ -95,7 +95,7 @@ void print_env_maybe()
         return;
 
     printf("#### ENV\n");
-    printf("%-15s : %s\n", "cgroupspath", env.cgroups_path);
+    printf("%-15s : %s\n", "cgroup", env.cgroups_path);
     printf("%-15s : %s\n", "bpffs", env.bpffs);
     printf("%-15s : %s\n", "verbose", env.verbose ? "true" : "false");
     printf("####\n");
@@ -107,6 +107,10 @@ int main(int argc, char **argv)
 {
     struct mb_recvmsg_bpf *skel;
     int err, cgroup_fd;
+
+    // default values
+    env.bpffs = "/sys/fs/bpf";
+    env.cgroups_path = "/sys/fs/cgroup";
 
     /* Parse command line arguments */
     err = argp_parse(&argp, argc, argv, 0, NULL, &env);

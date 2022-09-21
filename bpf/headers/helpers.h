@@ -33,10 +33,6 @@ limitations under the License.
 #define ENABLE_IPV6 0
 #endif
 
-#ifndef __section
-#define __section(NAME) __attribute__((section(NAME), used))
-#endif
-
 #ifdef PRINTNL
 #define PRINT_SUFFIX "\n"
 #else

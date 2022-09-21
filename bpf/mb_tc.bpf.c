@@ -15,7 +15,6 @@ limitations under the License.
 */
 
 #include "headers/helpers.h"
-#include "headers/maps.h"
 #include "headers/mesh.h"
 
 #define TC_ACT_OK 0
@@ -24,7 +23,26 @@ limitations under the License.
 #define ETH_P_IP 0x0800
 #define ETH_HLEN 14
 
-__section("classifier") int mb_tc_ingress(struct __sk_buff *skb)
+// local_pods stores Pods' ips in current node.
+// which can be set by controller.
+// only contains injected pods.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __uint(key_size, sizeof(__u32) * 4);
+    __uint(value_size, sizeof(struct pod_config));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} local_pod_ips SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65535);
+    __uint(key_size, sizeof(struct pair));
+    __uint(value_size, sizeof(struct origin_info));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} pair_orig_dst SEC(".maps");
+
+SEC("classifier") int mb_tc_ingress(struct __sk_buff *skb)
 {
     void *data = (void *)(long)skb->data;
     void *data_end = (void *)(long)skb->data_end;
@@ -182,7 +200,7 @@ __section("classifier") int mb_tc_ingress(struct __sk_buff *skb)
     return TC_ACT_OK;
 }
 
-__section("classifier") int mb_tc_egress(struct __sk_buff *skb)
+SEC("classifier") int mb_tc_egress(struct __sk_buff *skb)
 {
     void *data = (void *)(long)skb->data;
     void *data_end = (void *)(long)skb->data_end;
@@ -288,5 +306,4 @@ __section("classifier") int mb_tc_egress(struct __sk_buff *skb)
     return TC_ACT_OK;
 }
 
-char ____license[] __section("license") = "GPL";
-int _version __section("version") = 1;
+char LICENSE[] SEC("license") = "GPL";

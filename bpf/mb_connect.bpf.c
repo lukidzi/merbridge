@@ -15,11 +15,46 @@ limitations under the License.
 */
 
 #include "headers/helpers.h"
-#include "headers/maps.h"
 #include "headers/mesh.h"
 
 #if ENABLE_IPV4
 static __u32 outip = 1;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65535);
+    __uint(key_size, sizeof(__u64));
+    __uint(value_size, sizeof(struct origin_info));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} cookie_orig_dst SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65535);
+    __uint(key_size, sizeof(__u64));
+    __uint(value_size, sizeof(__u32) * 4);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} netns_pod_ips SEC(".maps");
+
+// local_pods stores Pods' ips in current node.
+// which can be set by controller.
+// only contains injected pods.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __uint(key_size, sizeof(__u32) * 4);
+    __uint(value_size, sizeof(struct pod_config));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} local_pod_ips SEC(".maps");
+
+// process_ip stores envoy's ip address.
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __uint(key_size, sizeof(__u32));
+    __uint(value_size, sizeof(__u32));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} process_ip SEC(".maps");
 
 static inline int udp_connect4(struct bpf_sock_addr *ctx)
 {
@@ -265,7 +300,7 @@ static inline int tcp_connect4(struct bpf_sock_addr *ctx)
     return 1;
 }
 
-__section("cgroup/connect4") int mb_sock_connect4(struct bpf_sock_addr *ctx)
+SEC("cgroup/connect4") int mb_sock_connect4(struct bpf_sock_addr *ctx)
 {
     switch (ctx->protocol) {
     case IPPROTO_TCP:
@@ -408,7 +443,7 @@ static inline int tcp_connect6(struct bpf_sock_addr *ctx)
     return 1;
 }
 
-__section("cgroup/connect6") int mb_sock_connect6(struct bpf_sock_addr *ctx)
+SEC("cgroup/connect6") int mb_sock_connect6(struct bpf_sock_addr *ctx)
 {
     switch (ctx->protocol) {
     case IPPROTO_TCP:
@@ -421,5 +456,4 @@ __section("cgroup/connect6") int mb_sock_connect6(struct bpf_sock_addr *ctx)
 }
 #endif
 
-char ____license[] __section("license") = "GPL";
-int _version __section("version") = 1;
+char LICENSE[] SEC("license") = "GPL";
