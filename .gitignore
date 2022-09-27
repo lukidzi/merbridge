@@ -39,3 +39,4 @@ bpf/mb_redir
 bpf/mb_sendmsg
 bpf/mb_sockops
 bpf/mb_tc
+bpf/mb_netns_cleanup
