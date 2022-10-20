@@ -130,7 +130,10 @@ int main(int argc, char **argv)
     /* If program is already pinned, skip as it's probably already attached */
     if (access(prog_pin_path, F_OK) == 0) {
         printf("found pinned program %s - skipping\n", prog_pin_path);
-        goto cleanup;
+        /* It looks that on arm64 cleanup fails becuase of wrong address to skel */
+        free(prog_pin_path);
+        free(link_pin_path);
+        return 0;
     }
 
     LIBBPF_OPTS(bpf_object_open_opts, open_opts,
