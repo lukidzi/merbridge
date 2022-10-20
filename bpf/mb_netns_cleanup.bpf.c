@@ -36,7 +36,12 @@ struct {
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } local_pod_ips SEC(".maps");
 
+// arm64 doesn't support fexit/fenter
+#ifdef __TARGET_ARCH_arm64
+SEC("kretprobe/net_ns_net_exit")
+#else
 SEC("fexit/net_ns_net_exit")
+#endif
 int BPF_PROG(net_ns_net_exit, struct net *net, long ret)
 {
     __u64 netns_inum = BPF_CORE_READ(net, ns.inum);
