@@ -127,7 +127,6 @@ int main(int argc, char **argv)
     /* If program is already pinned, skip as it's probably already attached */
     if (access(prog_pin_path, F_OK) == 0) {
         printf("found pinned program %s - skipping\n", prog_pin_path);
-        free(prog_pin_path);
         return 0;
     }
 

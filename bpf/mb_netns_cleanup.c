@@ -114,9 +114,7 @@ int main(int argc, char **argv)
 
     size_t len = strlen(env.bpffs) + sizeof(RELATIVE_PIN_PATH) + 6;
     char *prog_pin_path = (char *)malloc(len);
-    char *link_pin_path = (char *)malloc(len);
     snprintf(prog_pin_path, len, "%s%s_prog", env.bpffs, RELATIVE_PIN_PATH);
-    snprintf(link_pin_path, len, "%s%s_link", env.bpffs, RELATIVE_PIN_PATH);
 
     print_env_maybe();
 
@@ -132,7 +130,6 @@ int main(int argc, char **argv)
         printf("found pinned program %s - skipping\n", prog_pin_path);
         /* It looks that on arm64 cleanup fails becuase of wrong address to skel */
         free(prog_pin_path);
-        free(link_pin_path);
         return 0;
     }
 
@@ -172,14 +169,6 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    err = bpf_link__pin(skel->links.net_ns_net_exit, link_pin_path);
-    if (err) {
-        fprintf(stderr,
-                "pinning net_ns_net_exit link to %s failed with error: %d\n",
-                link_pin_path, err);
-        goto cleanup;
-    }
-
 cleanup:
     if (skel != NULL) {
         mb_netns_cleanup_bpf__destroy(skel);
@@ -187,11 +176,9 @@ cleanup:
 
     if (err != 0) {
         remove_file_if_exists(prog_pin_path);
-        remove_file_if_exists(link_pin_path);
     }
 
     free(prog_pin_path);
-    free(link_pin_path);
 
     return -err;
 }
