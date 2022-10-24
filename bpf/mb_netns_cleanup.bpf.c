@@ -45,7 +45,7 @@ SEC("fexit/proc_free_inum")
 int BPF_PROG(proc_free_inum, __u64 inum, long ret)
 #endif
 {
-    __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &inum);
+    __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, inum);
 
     if (!ip) {
         debugf("clean : ip for netns not found: netns_inum: %u", inum);
