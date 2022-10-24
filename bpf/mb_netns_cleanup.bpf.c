@@ -39,10 +39,10 @@ struct {
 // arm64 doesn't support fexit/fenter
 #ifdef __TARGET_ARCH_arm64
 SEC("kprobe/proc_free_inum")
-int BPF_KPROBE(proc_free_inum, unsigned int inum)
+int BPF_KPROBE(proc_free_inum, __u64 inum)
 #else
-SEC("fexit/proc_free_inum")
-int BPF_PROG(proc_free_inum, unsigned int inum, long ret)
+SEC("kprobe/proc_free_inum")
+int BPF_KPROBE(proc_free_inum, __u64 inum)
 #endif
 {
     __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &inum);
