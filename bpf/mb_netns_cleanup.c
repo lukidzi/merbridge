@@ -164,7 +164,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    err = bpf_program__pin(skel->progs.net_ns_net_exit, prog_pin_path);
+    err = bpf_program__pin(skel->progs.proc_free_inum, prog_pin_path);
     if (err) {
         fprintf(stderr,
                 "pinning net_ns_net_exit program to %s failed with error: %d\n",
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    err = bpf_link__pin(skel->links.net_ns_net_exit, link_pin_path);
+    err = bpf_link__pin(skel->links.proc_free_inum, link_pin_path);
     if (err) {
         fprintf(stderr,
                 "pinning net_ns_net_exit link to %s failed with error: %d\n",
