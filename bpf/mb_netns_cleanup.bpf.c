@@ -48,7 +48,7 @@ int BPF_PROG(proc_free_inum, __u64 inum)
     __u64 netns_inum = inum;
     __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &netns_inum);
 
-     debugf("clean_test : inum hex: %x", netns_inum);
+    debugf("clean : inum hex: %x", netns_inum);
     if (!ip) {
         debugf("clean : ip for netns not found: netns_inum: %u", netns_inum);
     } else {
