@@ -41,25 +41,25 @@ struct {
 SEC("kprobe/proc_free_inum")
 int BPF_KPROBE(proc_free_inum, __u64 inum)
 #else
-SEC("kprobe/proc_free_inum")
-int BPF_KPROBE(proc_free_inum, __u64 inum)
+SEC("fexit/proc_free_inum")
+int BPF_PROG(proc_free_inum, __u64 inum)
 #endif
 {
-    __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &inum);
-
+    __u64 netns_inum = inum;
+    __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &netns_inum);
     if (!ip) {
-        debugf("clean : ip for netns not found: netns_inum: %u", inum);
+        debugf("clean : ip for netns not found: netns_inum: %u", netns_inum);
     } else {
         __u32 curr_pod_ip = get_ipv4(ip);
         bpf_map_delete_elem(&local_pod_ips, ip);
         debugf("clean : local_pod_ips: element removed: "
                "netns_inum: %u, ip: %pI4",
-               inum, &curr_pod_ip);
+               netns_inum, &curr_pod_ip);
 
-        bpf_map_delete_elem(&netns_pod_ips, &inum);
+        bpf_map_delete_elem(&netns_pod_ips, &netns_inum);
         debugf("clean : netns_pod_ips: element removed: "
                "netns_inum: %u",
-               inum);
+               netns_inum);
     }
 
     return 0;
