@@ -38,28 +38,28 @@ struct {
 
 // arm64 doesn't support fexit/fenter
 #ifdef __TARGET_ARCH_arm64
-SEC("kretprobe/net_ns_net_exit")
+SEC("kprobe/proc_free_inum")
+int BPF_KPROBE(proc_free_inum, __u64 inum)
 #else
-SEC("fexit/net_ns_net_exit")
+SEC("fexit/proc_free_inum")
+int BPF_PROG(proc_free_inum, __u64 inum, long ret)
 #endif
-int BPF_PROG(net_ns_net_exit, struct net *net, long ret)
 {
-    __u64 netns_inum = BPF_CORE_READ(net, ns.inum);
-    __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &netns_inum);
+    __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &inum);
 
     if (!ip) {
-        debugf("clean : ip for netns not found: netns_inum: %u", netns_inum);
+        debugf("clean : ip for netns not found: netns_inum: %u", inum);
     } else {
         __u32 curr_pod_ip = get_ipv4(ip);
         bpf_map_delete_elem(&local_pod_ips, ip);
         debugf("clean : local_pod_ips: element removed: "
                "netns_inum: %u, ip: %pI4",
-               netns_inum, &curr_pod_ip);
+               inum, &curr_pod_ip);
 
-        bpf_map_delete_elem(&netns_pod_ips, &netns_inum);
+        bpf_map_delete_elem(&netns_pod_ips, &inum);
         debugf("clean : netns_pod_ips: element removed: "
                "netns_inum: %u",
-               netns_inum);
+               inum);
     }
 
     return 0;
