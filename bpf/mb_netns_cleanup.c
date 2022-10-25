@@ -15,6 +15,7 @@
 static struct env {
     bool verbose;
     char *bpffs;
+    char *cgroups_path;
 } env;
 
 const char *argp_program_version = "mb_netns_cleanup 0.1";
@@ -95,6 +96,11 @@ int remove_file_if_exists(const char *path)
 
     return err;
 }
+static volatile sig_atomic_t stop;
+static void sig_int(int signo)
+{
+	stop = 1;
+}
 
 
 int main(int argc, char **argv)
@@ -104,6 +110,7 @@ int main(int argc, char **argv)
 
     // default values
     env.bpffs = "/sys/fs/bpf";
+    env.cgroups_path = "/sys/fs/cgroup";
 
     /* Parse command line arguments */
     err = argp_parse(&argp, argc, argv, 0, NULL, &env);
@@ -179,6 +186,19 @@ int main(int argc, char **argv)
                 link_pin_path, err);
         goto cleanup;
     }
+
+    if (signal(SIGINT, sig_int) == SIG_ERR) {
+		fprintf(stderr, "can't set signal handler: %s\n", strerror(errno));
+		goto cleanup;
+	}
+
+	printf("Successfully started! Please run `sudo cat /sys/kernel/debug/tracing/trace_pipe` "
+	       "to see output of the BPF programs.\n");
+
+	while (!stop) {
+		fprintf(stderr, ".");
+		sleep(1);
+	}
 
 cleanup:
     if (skel != NULL) {
