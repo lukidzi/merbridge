@@ -58,7 +58,7 @@ int BPF_PROG(proc_free_inum, __u64 inum)
         bpf_map_delete_elem(&netns_pod_ips, &inum);
         debugf("clean : netns_pod_ips: element removed: "
                "netns_inum: %u",
-               netns_inum);
+               inum);
     }
 
     return 0;
