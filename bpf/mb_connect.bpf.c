@@ -105,7 +105,6 @@ static inline int tcp_connect4(struct bpf_sock_addr *ctx)
     struct task_struct *t = (struct task_struct *)bpf_get_current_task();
     __u64 netns_inum = BPF_CORE_READ(t, nsproxy, net_ns, ns.inum);
 
-    debugf("conn4 : inum hex: %x", netns_inum);
     __u32 *ip = bpf_map_lookup_elem(&netns_pod_ips, &netns_inum);
     if (!ip) {
         debugf("conn4 : geting ip for netns failed: netns_inum: %u",
