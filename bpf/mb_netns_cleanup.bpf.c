@@ -36,7 +36,9 @@ struct {
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } local_pod_ips SEC(".maps");
 
-
+// kprobes enables to dynamically break into any kernel routine and collect
+// debugging and performance information non-disruptively. fexit/fenter have 
+// a bit better performance but are not supported by all kernel's version and arm64
 SEC("kprobe/proc_free_inum")
 int BPF_KPROBE(proc_free_inum, __u64 inum)
 {
