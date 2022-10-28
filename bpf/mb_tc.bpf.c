@@ -27,8 +27,8 @@ limitations under the License.
 // which can be set by controller.
 // only contains injected pods.
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65535);
     __uint(key_size, sizeof(__u32) * 4);
     __uint(value_size, sizeof(struct pod_config));
     __uint(pinning, LIBBPF_PIN_BY_NAME);
