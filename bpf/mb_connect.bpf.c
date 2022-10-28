@@ -28,9 +28,12 @@ struct {
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } cookie_orig_dst SEC(".maps");
 
+// BPF_MAP_TYPE_LRU_HASH - an LRU hash will
+// automatically evict the least recently used
+// entries when the hash table reaches capacity
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 65535);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 2);
     __uint(key_size, sizeof(__u64));
     __uint(value_size, sizeof(__u32) * 4);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
@@ -40,8 +43,8 @@ struct {
 // which can be set by controller.
 // only contains injected pods.
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65535);
     __uint(key_size, sizeof(__u32) * 4);
     __uint(value_size, sizeof(struct pod_config));
     __uint(pinning, LIBBPF_PIN_BY_NAME);
