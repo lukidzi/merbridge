@@ -24,7 +24,7 @@ const (
 	ModeIstio   = "istio"
 	ModeLinkerd = "linkerd"
 	ModeKuma    = "kuma"
-	LocalPodIps = "/sys/fs/bpf/tc/globals/local_pod_ips"
+	LocalPodIps = "/sys/fs/bpf/local_pod_ips"
 )
 
 var (

@@ -19,10 +19,7 @@ package cniserver
 import (
 	"bufio"
 	"bytes"
-	"context"
-	"errors"
 	"fmt"
-	"hash/fnv"
 	"net"
 	"os"
 	"os/exec"
@@ -30,32 +27,25 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"syscall"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/plugins/pkg/ns"
+	kumanet_ebpf "github.com/kumahq/kuma-net/ebpf"
+	kumanet_config "github.com/kumahq/kuma-net/transparent-proxy/config"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sys/unix"
 	"istio.io/istio/cni/pkg/plugin"
 
 	"github.com/merbridge/merbridge/config"
+	"github.com/merbridge/merbridge/internal/ebpfs"
 	"github.com/merbridge/merbridge/pkg/linux"
 )
 
 type qdisc struct {
-	netns     string
-	device    string
-	hasClsact bool
-}
-
-func getMarkKeyOfNetns(netns string) uint32 {
-	// todo check conflict?
-	algorithm := fnv.New32a()
-	_, _ = algorithm.Write([]byte(netns))
-	return algorithm.Sum32()
+	netns  string
+	device string
 }
 
 func (s *server) CmdAdd(args *skel.CmdArgs) (err error) {
@@ -84,8 +74,7 @@ func (s *server) CmdAdd(args *skel.CmdArgs) (err error) {
 	}
 
 	err = netns.Do(func(_ ns.NetNS) error {
-		// listen on 39807
-		if err := s.buildListener(netns.Path()); err != nil {
+		if err := s.updateNetNSPodIPsMap(netns.Path()); err != nil {
 			return err
 		}
 		// attach tc to the device
@@ -121,121 +110,75 @@ func (s *server) CmdDelete(args *skel.CmdArgs) (err error) {
 	s.Lock()
 
 	delete(s.qdiscs, inode)
-	delete(s.listeners, inode)
 
 	s.Unlock()
 	m, err := ebpf.LoadPinnedMap(path.Join(s.bpfMountPath, "netns_pod_ips"), &ebpf.LoadPinOptions{})
 	if err != nil {
 		return err
 	}
-	key := getMarkKeyOfNetns(args.Netns)
-	return m.Delete(key)
+	return m.Delete(inode)
 }
 
-// listen on 39807
-func (s *server) buildListener(netns string) error {
-	inode, err := linux.GetFileInode(netns)
-	if err != nil {
-		return err
-	}
+func getAddr() (*net.Addr, error) {
 	var addrs []net.Addr
+
 	ifaces, _ := net.Interfaces()
 	for _, iface := range ifaces {
 		if (iface.Flags&net.FlagLoopback) != 0 || (iface.Flags&net.FlagUp) == 0 {
 			continue
 		}
+
 		ifAddrs, err := iface.Addrs()
 		if err != nil || len(ifAddrs) == 0 {
 			continue
 		}
+
 		addrs = append(addrs, ifAddrs...)
 	}
+
 	if len(addrs) == 0 {
-		log.Errorf("no ip address for %s", netns)
-		return nil
-	}
-	if len(addrs) != 1 {
-		log.Warnf("get ip address for %s: res: %v, merbridge only support single ip address", netns, addrs)
+		return nil, fmt.Errorf("no ip address")
 	}
 
-	lc := s.listenConfig(addrs[0], netns)
-	var l net.Listener
-	if config.EnableIPV4 {
-		l, err = lc.Listen(context.Background(), "tcp", "0.0.0.0:39807")
-	} else {
-		l, err = lc.Listen(context.Background(), "tcp", "[::]:39807")
+	if len(addrs) != 1 {
+		log.Warnf("get ip address, res: %v, merbridge only support single ip address", addrs)
 	}
+
+	return &addrs[0], nil
+}
+
+func (s *server) updateNetNSPodIPsMap(netns string) error {
+	inode, err := linux.GetFileInode(netns)
 	if err != nil {
-		if config.EnableHotRestart && errors.Is(err, syscall.EADDRINUSE) {
-			if err != nil {
-				log.Errorf("get inode err: %v", err)
-			}
-			for _, tcpfn := range s.listeners {
-				tcpln := tcpfn.(*net.TCPListener)
-				f, err := tcpln.File()
-				if err != nil {
-					log.Errorf("parse back listen err: %v", err)
-					continue
-				}
-				_inode, err := getInoFromFd(f)
-				if err != nil {
-					log.Errorf("get inode err: %v", err)
-					continue
-				}
-				if inode == _inode {
-					if s.listeners == nil {
-						s.listeners = make(map[uint64]net.Listener)
-					}
-					s.listeners[inode] = tcpln
-				}
-			}
-		}
 		return err
 	}
 
-	s.Lock()
-	// keep the listener, otherwise it will be GCed
-	s.listeners[inode] = l
-	if config.EnableHotRestart && s.hotUpgradeFlag {
-		s.transferFd(l)
+	addr, err := getAddr()
+	if err != nil {
+		return err
 	}
-	s.Unlock()
-	return nil
-}
 
-func (s *server) listenConfig(addr net.Addr, netns string) net.ListenConfig {
-	return net.ListenConfig{
-		Control: func(network, address string, conn syscall.RawConn) error {
-			var operr error
-			if err := conn.Control(func(fd uintptr) {
-				m, err := ebpf.LoadPinnedMap(path.Join(s.bpfMountPath, "netns_pod_ips"), &ebpf.LoadPinOptions{})
-				if err != nil {
-					operr = err
-					return
-				}
-				var ip unsafe.Pointer
-				switch v := addr.(type) { // todo instead of hash
-				case *net.IPNet: // nolint: typecheck
-					ip, err = linux.IP2Linux(v.IP.String())
-				case *net.IPAddr: // nolint: typecheck
-					ip, err = linux.IP2Linux(v.String())
-				}
-				if err != nil {
-					operr = err
-					return
-				}
-				key := getMarkKeyOfNetns(netns)
-				operr = m.Update(key, ip, ebpf.UpdateAny)
-				if operr != nil {
-					return
-				}
-				operr = syscall.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, int(key))
-			}); err != nil {
-				return err
-			}
-			return operr
-		},
+	m, err := ebpf.LoadPinnedMap(path.Join(s.bpfMountPath, "netns_pod_ips"), &ebpf.LoadPinOptions{})
+	if err != nil {
+		return err
 	}
+
+	var ip unsafe.Pointer
+	switch v := (*addr).(type) {
+	case *net.IPNet: // nolint: typecheck
+		ip, err = linux.IP2Linux(v.IP.String())
+	case *net.IPAddr: // nolint: typecheck
+		ip, err = linux.IP2Linux(v.String())
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := m.Update(inode, ip, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("updating netns_pod_ips map failed (ip: %v, nens: %v): %v", ip, inode, err)
+	}
+
+	return nil
 }
 
 func (s *server) checkAndRepairPodPrograms() error {
@@ -243,47 +186,55 @@ func (s *server) checkAndRepairPodPrograms() error {
 	if err != nil {
 		return err
 	}
+
+	namespaces := map[uintptr]ns.NetNS{}
+
 	for _, f := range hostProc {
 		if _, err = strconv.Atoi(f.Name()); err == nil {
 			pid := f.Name()
-			if skipListening(s.serviceMeshMode, pid) {
+			if skipPid(s.serviceMeshMode, pid) {
 				// ignore non-injected pods
 				log.Debugf("skip listening for pid(%s)", pid)
 				continue
 			}
+
 			np := fmt.Sprintf("%s/%s/ns/net", config.HostProc, pid)
 			netns, err := ns.GetNS(np)
 			if err != nil {
 				log.Errorf("Failed to get ns for %s, error: %v", np, err)
 				continue
 			}
-			if err = netns.Do(func(_ ns.NetNS) error {
-				log.Infof("build listener for pid(%s)", pid)
-				// listen on 39807
-				if err := s.buildListener(netns.Path()); err != nil {
-					return err
-				}
-				// attach tc to the device
-				ifaces, _ := net.Interfaces()
-				for _, iface := range ifaces {
-					if (iface.Flags&net.FlagLoopback) == 0 && (iface.Flags&net.FlagUp) != 0 {
-						return s.attachTC(netns.Path(), iface.Name)
-					}
-				}
-				return fmt.Errorf("device not found for pid(%s)", pid)
-			}); err != nil {
-				if errors.Is(err, syscall.EADDRINUSE) {
-					// skip if it has listened on 39807
-					continue
-				}
-				return err
-			}
+
+			namespaces[netns.Fd()] = netns
 		}
 	}
+
+	for _, netns := range namespaces {
+		if err = netns.Do(func(_ ns.NetNS) error {
+			log.Infof("build listener for netns: %s", netns.Path())
+
+			if err := s.updateNetNSPodIPsMap(netns.Path()); err != nil {
+				return err
+			}
+
+			// attach tc to the device
+			ifaces, _ := net.Interfaces()
+			for _, iface := range ifaces {
+				if (iface.Flags&net.FlagLoopback) == 0 && (iface.Flags&net.FlagUp) != 0 {
+					return s.attachTC(netns.Path(), iface.Name)
+				}
+			}
+
+			return fmt.Errorf("device not found for netns: %s", netns.Path())
+		}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func skipListening(serviceMeshMode string, pid string) bool {
+func skipPid(serviceMeshMode string, pid string) bool {
 	b, _ := os.ReadFile(fmt.Sprintf("%s/%s/comm", config.HostProc, pid))
 	comm := strings.TrimSpace(string(b))
 
@@ -324,33 +275,27 @@ func (s *server) attachTC(netns, dev string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("tc qdisc add dev %s clsact", dev))
-	err = cmd.Run()
-	hasCls := false
-	if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-		log.Errorf("Add clsact to %s failed: unexpected exit code: %d, err: %v", dev, code, err)
-		// TODO(dddddai): check if clsact exists
-		hasCls = true
-	}
 
-	obj := "bpf/mb_tc.o"
-
-	cmd = exec.Command("sh", "-c", fmt.Sprintf("tc filter add prio 66 dev %s ingress bpf da obj %s sec classifier_ingress", dev, obj))
-	err = cmd.Run()
-	if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-		return fmt.Errorf("failed to attach tc(ingress) to %s, unexpected exit code: %d, err: %v", dev, code, err)
-	}
-	cmd = exec.Command("sh", "-c", fmt.Sprintf("tc filter add prio 66 dev %s egress bpf da obj %s sec classifier_egress", dev, obj))
-	err = cmd.Run()
-	if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-		return fmt.Errorf("failed to attach tc(egress) to %s, unexpected exit code: %d, err: %v", dev, code, err)
+	if err := kumanet_ebpf.LoadAndAttachEbpfPrograms([]*kumanet_ebpf.Program{
+		ebpfs.MBTc,
+	}, kumanet_config.Config{
+		RuntimeStdout: os.Stderr,
+		RuntimeStderr: os.Stderr,
+		Ebpf: kumanet_config.Ebpf{
+			Enabled:            true,
+			BPFFSPath:          "/sys/fs/bpf",
+			ProgramsSourcePath: "/app/bpf",
+			TCAttachIface:      dev,
+		},
+		Verbose: config.Debug,
+	}); err != nil {
+		return fmt.Errorf("failed to load ebpf programs: %v", err)
 	}
 
 	s.Lock()
 	s.qdiscs[inode] = qdisc{
-		netns:     netns,
-		device:    dev,
-		hasClsact: hasCls,
+		netns:  netns,
+		device: dev,
 	}
 	s.Unlock()
 	return nil
@@ -366,23 +311,15 @@ func (s *server) cleanUpTC() {
 			continue
 		}
 		if err = netns.Do(func(_ ns.NetNS) error {
-			if !q.hasClsact {
-				cmd := exec.Command("sh", "-c", fmt.Sprintf("tc qdisc delete dev %s clsact", q.device))
-				err := cmd.Run()
-				if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-					return fmt.Errorf("failed to delete clsact from %s, unexpected exit code: %d, err: %v", q.device, code, err)
-				}
-			} else {
-				cmd := exec.Command("sh", "-c", fmt.Sprintf("tc filter delete dev %s egress prio 66", q.device))
-				err := cmd.Run()
-				if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-					return fmt.Errorf("failed to delete egress filter from %s, unexpected exit code: %d, err: %v", q.device, code, err)
-				}
-				cmd = exec.Command("sh", "-c", fmt.Sprintf("tc filter delete dev %s ingress prio 66", q.device))
-				err = cmd.Run()
-				if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-					return fmt.Errorf("failed to delete ingress filter from %s, unexpected exit code: %d, err: %v", q.device, code, err)
-				}
+			cmd := exec.Command("sh", "-c", fmt.Sprintf("tc filter delete dev %s egress prio 66", q.device))
+			err := cmd.Run()
+			if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
+				return fmt.Errorf("failed to delete egress filter from %s, unexpected exit code: %d, err: %v", q.device, code, err)
+			}
+			cmd = exec.Command("sh", "-c", fmt.Sprintf("tc filter delete dev %s ingress prio 66", q.device))
+			err = cmd.Run()
+			if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
+				return fmt.Errorf("failed to delete ingress filter from %s, unexpected exit code: %d, err: %v", q.device, code, err)
 			}
 			return nil
 		}); err != nil {

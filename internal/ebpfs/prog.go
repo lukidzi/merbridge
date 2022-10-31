@@ -18,54 +18,88 @@ package ebpfs
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
+	kumanet_ebpf "github.com/kumahq/kuma-net/ebpf"
+	kumanet_config "github.com/kumahq/kuma-net/transparent-proxy/config"
 )
 
-func LoadMBProgs(meshMode string, useReconnect bool, debug bool) error {
-	if os.Getuid() != 0 {
-		return fmt.Errorf("root user in required for this process or container")
+var (
+	MBConnect = &kumanet_ebpf.Program{
+		Name:  "mb_connect",
+		Flags: kumanet_ebpf.CgroupFlags,
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			"connect", // directory
+			kumanet_ebpf.MapRelativePathCookieOrigDst,
+			kumanet_ebpf.MapRelativePathNetNSPodIPs,
+			kumanet_ebpf.MapRelativePathLocalPodIPs,
+			kumanet_ebpf.MapRelativePathProcessIP,
+		),
 	}
-	cmd := exec.Command("make", "load")
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "MESH_MODE="+meshMode)
-	if debug {
-		cmd.Env = append(cmd.Env, "DEBUG=1")
+	MBSockops = &kumanet_ebpf.Program{
+		Name:  "mb_sockops",
+		Flags: kumanet_ebpf.CgroupFlags,
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			"sockops",
+			kumanet_ebpf.MapRelativePathCookieOrigDst,
+			kumanet_ebpf.MapRelativePathProcessIP,
+			kumanet_ebpf.MapRelativePathPairOrigDst,
+			kumanet_ebpf.MapRelativePathSockPairMap,
+		),
 	}
-	if useReconnect {
-		cmd.Env = append(cmd.Env, "USE_RECONNECT=1")
+	MBGetSockopts = &kumanet_ebpf.Program{
+		Name:  "mb_get_sockopts",
+		Flags: kumanet_ebpf.CgroupFlags,
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			"get_sockopts",
+			kumanet_ebpf.MapRelativePathPairOrigDst,
+		),
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-		return fmt.Errorf("unexpected exit code: %d, err: %v", code, err)
+	MBSendmsg = &kumanet_ebpf.Program{
+		Name:  "mb_sendmsg",
+		Flags: kumanet_ebpf.CgroupFlags,
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			"sendmsg",
+			kumanet_ebpf.MapRelativePathCookieOrigDst,
+		),
 	}
-	return nil
-}
+	MBRecvmsg = &kumanet_ebpf.Program{
+		Name:  "mb_recvmsg",
+		Flags: kumanet_ebpf.CgroupFlags,
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			"recvmsg",
+			kumanet_ebpf.MapRelativePathCookieOrigDst,
+		),
+	}
+	MBRedir = &kumanet_ebpf.Program{
+		Name:  "mb_redir",
+		Flags: kumanet_ebpf.Flags(nil),
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			"redir",
+			kumanet_ebpf.MapRelativePathSockPairMap,
+		),
+	}
+	MBTc = &kumanet_ebpf.Program{
+		Name: "mb_tc",
+		Flags: func(
+			cfg kumanet_config.Config,
+			cgroup string,
+			bpffs string,
+		) ([]string, error) {
+			var err error
+			var iface string
 
-func AttachMBProgs() error {
-	if os.Getuid() != 0 {
-		return fmt.Errorf("root user in required for this process or container")
-	}
-	cmd := exec.Command("make", "attach")
-	cmd.Env = os.Environ()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-		return fmt.Errorf("unexpected exit code: %d, err: %v", code, err)
-	}
-	return nil
-}
+			if cfg.Ebpf.TCAttachIface != "" && kumanet_ebpf.InterfaceIsUp(cfg.Ebpf.TCAttachIface) {
+				iface = cfg.Ebpf.TCAttachIface
+			} else if iface, err = kumanet_ebpf.GetNonLoopbackRunningInterface(); err != nil {
+				return nil, fmt.Errorf("getting non-loopback interface failed: %v", err)
+			}
 
-func UnLoadMBProgs() error {
-	cmd := exec.Command("make", "-k", "clean")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if code := cmd.ProcessState.ExitCode(); code != 0 || err != nil {
-		return fmt.Errorf("unload unexpected exit code: %d, err: %v", code, err)
+			return kumanet_ebpf.Flags(map[string]string{
+				"--iface": iface,
+			})(cfg, cgroup, bpffs)
+		},
+		Cleanup: kumanet_ebpf.CleanPathsRelativeToBPFFS(
+			kumanet_ebpf.MapRelativePathLocalPodIPs,
+			kumanet_ebpf.MapRelativePathPairOrigDst,
+		),
 	}
-	return nil
-}
+)

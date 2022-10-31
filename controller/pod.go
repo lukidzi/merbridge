@@ -27,6 +27,8 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf"
+	kumanet_ebpf "github.com/kumahq/kuma-net/ebpf"
+	kumanet_config "github.com/kumahq/kuma-net/transparent-proxy/config"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -51,9 +53,31 @@ func RunLocalPodController(client kubernetes.Interface, stop chan struct{}) erro
 	}
 
 	log.Info("Pod Watcher Ready")
-	if err = ebpfs.AttachMBProgs(); err != nil {
-		return fmt.Errorf("failed to attach ebpf programs: %v", err)
+
+	programs := []*kumanet_ebpf.Program{
+		ebpfs.MBConnect,
+		ebpfs.MBSockops,
+		ebpfs.MBGetSockopts,
+		ebpfs.MBSendmsg,
+		ebpfs.MBRecvmsg,
+		ebpfs.MBRedir,
 	}
+
+	cfg := kumanet_config.Config{
+		RuntimeStdout: os.Stderr,
+		RuntimeStderr: os.Stderr,
+		Ebpf: kumanet_config.Ebpf{
+			Enabled:            true,
+			BPFFSPath:          "/sys/fs/bpf",
+			ProgramsSourcePath: "/app/bpf",
+		},
+		Verbose: config.Debug,
+	}
+
+	if err := kumanet_ebpf.LoadAndAttachEbpfPrograms(programs, cfg); err != nil {
+		return fmt.Errorf("failed to load ebpf programs: %v", err)
+	}
+
 	if config.EnableCNI {
 		<-stop
 	} else {
@@ -63,9 +87,15 @@ func RunLocalPodController(client kubernetes.Interface, stop chan struct{}) erro
 	}
 	w.Shutdown()
 
-	if err = ebpfs.UnLoadMBProgs(); err != nil {
-		return fmt.Errorf("unload failed: %v", err)
+	warning, err := kumanet_ebpf.UnloadEbpfPrograms(programs, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup after ebpf programs: %s", err)
 	}
+
+	if warning != "" {
+		_, _ = fmt.Fprintln(os.Stderr, warning)
+	}
+
 	log.Info("Pod Watcher Down")
 	return nil
 }

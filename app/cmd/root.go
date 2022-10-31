@@ -23,6 +23,8 @@ import (
 	"runtime"
 	"strings"
 
+	kumanet_ebpf "github.com/kumahq/kuma-net/ebpf"
+	kumanet_config "github.com/kumahq/kuma-net/transparent-proxy/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -38,7 +40,23 @@ var rootCmd = &cobra.Command{
 	Short: "Use eBPF to speed up your Service Mesh like crossing an Einstein-Rosen Bridge.",
 	Long:  `Use eBPF to speed up your Service Mesh like crossing an Einstein-Rosen Bridge.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := ebpfs.LoadMBProgs(config.Mode, config.UseReconnect, config.Debug); err != nil {
+		if err := kumanet_ebpf.LoadAndAttachEbpfPrograms([]*kumanet_ebpf.Program{
+			ebpfs.MBConnect,
+			ebpfs.MBSockops,
+			ebpfs.MBGetSockopts,
+			ebpfs.MBSendmsg,
+			ebpfs.MBRecvmsg,
+			ebpfs.MBRedir,
+		}, kumanet_config.Config{
+			RuntimeStdout: os.Stderr,
+			RuntimeStderr: os.Stderr,
+			Ebpf: kumanet_config.Ebpf{
+				Enabled:            true,
+				BPFFSPath:          "/sys/fs/bpf",
+				ProgramsSourcePath: "/app/bpf",
+			},
+			Verbose: config.Debug,
+		}); err != nil {
 			return fmt.Errorf("failed to load ebpf programs: %v", err)
 		}
 
