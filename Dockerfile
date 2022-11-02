@@ -13,6 +13,9 @@ ARG LLVM_STRIP=llvm-strip-14
 
 ADD . .
 
+# Init submoduls
+RUN git submodule update --init --recursive
+
 # Step to cache it when building docker image
 RUN make \
   LLVM_STRIP=$LLVM_STRIP \
